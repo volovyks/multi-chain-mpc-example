@@ -1,0 +1,23 @@
+{
+  "name": "multi-chain-mpc-example",
+  "version": "0.0.1",
+  "description": "MPC interaction example",
+  "main": "out/index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "node ./out/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/volovyks/multi-chain-mpc-example.git"
+  },
+  "author": "sergeyvolovyk@gmail.com",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/volovyks/multi-chain-mpc-example/issues"
+  },
+  "homepage": "https://github.com/volovyks/multi-chain-mpc-example#readme",
+  "dependencies": {
+    "typescript": "^5.3.3"
+  }
+}

@@ -5,7 +5,7 @@ import { ecsign } from 'ethereumjs-util';
 import { Transaction, TxData, TxOptions } from "web3-eth-accounts";
 
 const RPC_URL = "https://rpc.testnet.near.org";
-const MULTI_CHAIN_CONTRACT_ID = "multichain-dev0.testnet"; // multichain-testnet-2.testnet
+const MULTI_CHAIN_CONTRACT_ID = "multichain-testnet-2.testnet"; // "multichain-dev0.testnet"
 const NEAR_ACCOUNT_ID = "test-fastauth-user789.testnet";
 const NEAR_ACCOUNT_SK = "ed25519:2FtrAXcQQP9TNL7fKQc8vjQcBLfwfjYu6U3mWMNYMypGk3K3ofQFVFqrPWQoNNKSCASmCYmT3yUnzC9M1cGCWA63";
 const DERIVATION_PATH = "bnb";
@@ -14,6 +14,7 @@ const BNB_TESTNET_RPC_URL = "https://data-seed-prebsc-1-s1.binance.org:8545";
 const BNB_RECIEVER_ADDRESS = "0xa3286628134bad128faeef82f44e99aa64085c94";
 const BNB_SENDER_ADDRESS = "0x46Dd36F3235C748961427854948B32BD412AdD3c";
 const BNB_SENDER_PRIVATE_KEY = "0x9ea65c28a56227218ae206bacfa424be4da742791d93cb396d0ff5da3cee3736";
+const BNB_TESTNET_CHAIN_ID = 97n;
 
 async function main() {
     let account = await initNearAccount(NEAR_ACCOUNT_ID, NEAR_ACCOUNT_SK);
@@ -42,12 +43,12 @@ async function main() {
         value: web3.utils.toHex(web3.utils.toWei('1', 'kwei')),
         data: '0x', // optional data field
     } as TxData;
-    let transaction = Transaction.fromTxData(transactionData, transactionOptions);
+    let transaction = Transaction.fromTxData(transactionData);
     let messageHash = transaction.getMessageToSign(true);
 
-    const { v, r, s } = ecsign(Buffer.from(messageHash), Buffer.from(BNB_SENDER_PRIVATE_KEY, 'hex'), chainId);
+    const { v, r, s } = ecsign(Buffer.from(messageHash), Buffer.from(BNB_SENDER_PRIVATE_KEY.slice(2), 'hex'));
 
-    (transaction as any)._processSignature(v, r, s); // Hack to call protected method
+    (transaction as any)._processSignature(BigInt(v), r, s); // Hack to call protected method
 
     let transactionHash = await web3.eth.sendSignedTransaction(transaction.serialize()); // TODO: check serialization
     console.log("BNC transaction hash: ", transactionHash);

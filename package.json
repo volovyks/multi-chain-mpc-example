@@ -18,10 +18,11 @@
   },
   "homepage": "https://github.com/volovyks/multi-chain-mpc-example#readme",
   "dependencies": {
-    "ethereumjs-util": "^7.1.5",
+    "@ethereumjs/common": "^4.2.0",
+    "@ethereumjs/tx": "^5.2.1",
+    "@ethereumjs/util": "^9.0.2",
     "near-api-js": "^3.0.2",
     "typescript": "^5.3.3",
-    "web3": "^4.4.0",
-    "web3-eth-accounts": "^4.1.1"
+    "web3": "^4.4.0"
   }
 }

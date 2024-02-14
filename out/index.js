@@ -26,52 +26,61 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const nearAPI = __importStar(require("near-api-js"));
 const crypto = __importStar(require("crypto"));
 const web3_1 = require("web3");
-const ethereumjs_util_1 = require("ethereumjs-util");
-const web3_eth_accounts_1 = require("web3-eth-accounts");
+const util_1 = require("@ethereumjs/util");
+const tx_1 = require("@ethereumjs/tx");
+const common_1 = require("@ethereumjs/common");
 const RPC_URL = "https://rpc.testnet.near.org";
 const MULTI_CHAIN_CONTRACT_ID = "multichain-testnet-2.testnet"; // "multichain-dev0.testnet"
 const NEAR_ACCOUNT_ID = "test-fastauth-user789.testnet";
 const NEAR_ACCOUNT_SK = "ed25519:2FtrAXcQQP9TNL7fKQc8vjQcBLfwfjYu6U3mWMNYMypGk3K3ofQFVFqrPWQoNNKSCASmCYmT3yUnzC9M1cGCWA63";
-const DERIVATION_PATH = "bnb";
-const BNB_TESTNET_RPC_URL = "https://data-seed-prebsc-1-s1.binance.org:8545";
-const BNB_RECIEVER_ADDRESS = "0xa3286628134bad128faeef82f44e99aa64085c94";
-const BNB_SENDER_ADDRESS = "0x46Dd36F3235C748961427854948B32BD412AdD3c";
-const BNB_SENDER_PRIVATE_KEY = "0x9ea65c28a56227218ae206bacfa424be4da742791d93cb396d0ff5da3cee3736";
-const BNB_TESTNET_CHAIN_ID = 97n;
+const DERIVATION_PATH = "sepolia";
+const ETHEREUM_SEPOLIA_RPC_URL = "https://rpc2.sepolia.org";
+const ETHEREUM_SEPOLIA_RECIEVER_ADDRESS = "0xa3286628134bad128faeef82f44e99aa64085c94";
+const ETHEREUM_SEPOLIA_SENDER_ADDRESS = "0x46Dd36F3235C748961427854948B32BD412AdD3c";
+const ETHEREUM_SEPOLIA_SENDER_PRIVATE_KEY = "0x9ea65c28a56227218ae206bacfa424be4da742791d93cb396d0ff5da3cee3736";
+const ETHEREUM_SEPOLIA_CHAIN_ID = 11155111n;
 async function main() {
-    let account = await initNearAccount(NEAR_ACCOUNT_ID, NEAR_ACCOUNT_SK);
-    let bnbTransaction = await createBnbTransactionAndGetItsHash();
-    let signature = await signPayloadWithMpc(account, MULTI_CHAIN_CONTRACT_ID, bnbTransaction, DERIVATION_PATH);
-    console.log("Signature: ", signature);
+    // let account = await initNearAccount(NEAR_ACCOUNT_ID, NEAR_ACCOUNT_SK);
+    // let bnbTransaction = await createBnbTransactionAndGetItsHash();
+    // let signature = await signPayloadWithMpc(account, MULTI_CHAIN_CONTRACT_ID, bnbTransaction, DERIVATION_PATH);
+    // console.log("Signature: ", signature);
     //////////////////////// Sign and sent to BNC //////////////////////////
-    let web3 = new web3_1.Web3(BNB_TESTNET_RPC_URL);
+    let web3 = new web3_1.Web3(ETHEREUM_SEPOLIA_RPC_URL);
     let chainId = await web3.eth.getChainId();
     console.log("Chain ID: ", chainId);
-    let nonce = await web3.eth.getTransactionCount(BNB_SENDER_ADDRESS);
+    let nonce = await web3.eth.getTransactionCount(ETHEREUM_SEPOLIA_SENDER_ADDRESS);
     console.log("Nonce: ", nonce);
     let gasPrice = await web3.eth.getGasPrice(); // Do we need this?
     console.log("Gas price: ", gasPrice);
     await printBalances("before", web3);
-    let transactionOptions = {};
+    const common = new common_1.Common({ chain: common_1.Chain.Sepolia, hardfork: common_1.Hardfork.Istanbul });
     let transactionData = {
         nonce: nonce,
-        gasPrice: web3.utils.toHex(web3.utils.toWei('10', 'gwei')), // adjust gas price as needed
-        gas: web3.utils.toHex(21000), // you may need to adjust the gas limit
-        to: BNB_RECIEVER_ADDRESS,
-        value: web3.utils.toHex(web3.utils.toWei('1', 'kwei')),
-        data: '0x', // optional data field
+        gasLimit: 21000,
+        gasPrice,
+        to: ETHEREUM_SEPOLIA_RECIEVER_ADDRESS,
+        value: 1,
+        chainId: null, // In legacy transaction, chainId is not included
     };
-    let transaction = web3_eth_accounts_1.Transaction.fromTxData(transactionData);
-    let messageHash = transaction.getMessageToSign(true);
-    const { v, r, s } = (0, ethereumjs_util_1.ecsign)(Buffer.from(messageHash), Buffer.from(BNB_SENDER_PRIVATE_KEY.slice(2), 'hex'));
-    transaction._processSignature(BigInt(v), r, s); // Hack to call protected method
-    let transactionHash = await web3.eth.sendSignedTransaction(transaction.serialize()); // TODO: check serialization
-    console.log("BNC transaction hash: ", transactionHash);
+    console.log("Transaction data: ", transactionData);
+    let transaction = tx_1.LegacyTransaction.fromTxData(transactionData, { common });
+    console.log("Transaction: ", transaction);
+    // let messageHash: Uint8Array[] = transaction.getMessageToSign(); // TODO: which one do we need?
+    let messageHash = transaction.getHashedMessageToSign();
+    console.log("Message hash: ", messageHash);
+    const { v, r, s } = (0, util_1.ecsign)(messageHash, Buffer.from(ETHEREUM_SEPOLIA_SENDER_PRIVATE_KEY.slice(2), 'hex'));
+    console.log(`v: ${v}, r: ${r}, s: ${s}`); // In legacy transaction, v is 27 or 28, but in EIP-155, v is chainId * 2 + 35 or chainId * 2 + 36
+    let signedTransaction = transaction.addSignature(v, r, s);
+    console.log("Transaction with signature: ", signedTransaction);
+    // TODO: do we need to do this?
+    const serializedTx = (0, util_1.bytesToHex)(signedTransaction.serialize());
+    const transactionHash = await web3.eth.sendSignedTransaction(`${serializedTx}`);
+    console.log("Ethereum Transaction hash: ", transactionHash);
     await printBalances("after", web3);
 }
 async function printBalances(tag, web3) {
-    console.log(`Reciever balance ${tag}:`, await web3.eth.getBalance(BNB_RECIEVER_ADDRESS));
-    console.log(`Sender balance  ${tag}:`, await web3.eth.getBalance(BNB_SENDER_ADDRESS));
+    console.log(`Reciever balance ${tag}:`, await web3.eth.getBalance(ETHEREUM_SEPOLIA_RECIEVER_ADDRESS));
+    console.log(`Sender balance  ${tag}:`, await web3.eth.getBalance(ETHEREUM_SEPOLIA_SENDER_ADDRESS));
 }
 async function createBnbTransactionAndGetItsHash() {
     // TODO: Implement BNB transaction creation

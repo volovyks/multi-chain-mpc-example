@@ -19,6 +19,7 @@
   "homepage": "https://github.com/volovyks/multi-chain-mpc-example#readme",
   "dependencies": {
     "@ethereumjs/common": "^4.2.0",
+    "@ethereumjs/rlp": "^5.0.2",
     "@ethereumjs/tx": "^5.2.1",
     "@ethereumjs/util": "^9.0.2",
     "near-api-js": "^3.0.2",

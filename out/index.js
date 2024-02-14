@@ -29,6 +29,7 @@ const web3_1 = require("web3");
 const util_1 = require("@ethereumjs/util");
 const tx_1 = require("@ethereumjs/tx");
 const common_1 = require("@ethereumjs/common");
+const rlp_1 = require("@ethereumjs/rlp");
 const RPC_URL = "https://rpc.testnet.near.org";
 const MULTI_CHAIN_CONTRACT_ID = "multichain-testnet-2.testnet"; // "multichain-dev0.testnet"
 const NEAR_ACCOUNT_ID = "test-fastauth-user789.testnet";
@@ -57,21 +58,36 @@ async function main() {
     let transactionData = {
         nonce: nonce,
         gasLimit: 21000,
-        gasPrice,
+        // gasPrice,
+        gasPrice: 123004900n, // TODO: dynamic gas price is changing the recovered address. Why?
         to: ETHEREUM_SEPOLIA_RECIEVER_ADDRESS,
         value: 1,
         chainId: null, // In legacy transaction, chainId is not included
     };
     console.log("Transaction data: ", transactionData);
     let transaction = tx_1.LegacyTransaction.fromTxData(transactionData, { common });
-    console.log("Transaction: ", transaction);
+    // console.log("Transaction: ", transaction);
     // let messageHash: Uint8Array[] = transaction.getMessageToSign(); // TODO: which one do we need?
     let messageHash = transaction.getHashedMessageToSign();
     console.log("Message hash: ", messageHash);
-    const { v, r, s } = (0, util_1.ecsign)(messageHash, Buffer.from(ETHEREUM_SEPOLIA_SENDER_PRIVATE_KEY.slice(2), 'hex'));
+    const encodedMessageHash = rlp_1.RLP.encode(messageHash);
+    console.log("Encoded message hash: ", encodedMessageHash);
+    const { v, r, s } = (0, util_1.ecsign)(encodedMessageHash, Buffer.from(ETHEREUM_SEPOLIA_SENDER_PRIVATE_KEY.slice(2), 'hex'));
     console.log(`v: ${v}, r: ${r}, s: ${s}`); // In legacy transaction, v is 27 or 28, but in EIP-155, v is chainId * 2 + 35 or chainId * 2 + 36
     let signedTransaction = transaction.addSignature(v, r, s);
-    console.log("Transaction with signature: ", signedTransaction);
+    // console.log("Transaction with signature: ", signedTransaction);
+    let signedMessageHash = signedTransaction.getHashedMessageToSign();
+    console.log("Signed message hash: ", signedMessageHash);
+    let encodedSignedMessageHash = rlp_1.RLP.encode(signedMessageHash);
+    console.log("Encoded signed message hash: ", encodedSignedMessageHash);
+    let isSignatureValid = signedTransaction.verifySignature();
+    console.log("Is signature valid: ", isSignatureValid);
+    let recoveredSenderAddress = (0, util_1.bytesToHex)(signedTransaction.getSenderAddress().bytes);
+    console.log("Recovered sender address: ", recoveredSenderAddress);
+    let recoveredPublicKey = (0, util_1.bytesToHex)(signedTransaction.getSenderPublicKey());
+    console.log("Recovered public key: ", recoveredPublicKey);
+    let transactionValidationErrors = signedTransaction.getValidationErrors();
+    console.log("Transaction validation errors: ", transactionValidationErrors);
     // TODO: do we need to do this?
     const serializedTx = (0, util_1.bytesToHex)(signedTransaction.serialize());
     const transactionHash = await web3.eth.sendSignedTransaction(`${serializedTx}`);

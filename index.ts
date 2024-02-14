@@ -4,6 +4,7 @@ import { Web3 } from "web3"
 import { ecsign, bytesToHex } from '@ethereumjs/util';
 import { LegacyTxData, LegacyTransaction } from '@ethereumjs/tx';
 import { Chain, Common, Hardfork } from '@ethereumjs/common'
+import { RLP } from '@ethereumjs/rlp'
 
 const RPC_URL = "https://rpc.testnet.near.org";
 const MULTI_CHAIN_CONTRACT_ID = "multichain-testnet-2.testnet"; // "multichain-dev0.testnet"
@@ -18,11 +19,11 @@ const ETHEREUM_SEPOLIA_SENDER_PRIVATE_KEY = "0x9ea65c28a56227218ae206bacfa424be4
 const ETHEREUM_SEPOLIA_CHAIN_ID = 11155111n;
 
 async function main() {
-    let account = await initNearAccount(NEAR_ACCOUNT_ID, NEAR_ACCOUNT_SK);
-    let bnbTransaction = await createBnbTransactionAndGetItsHash();
+    // let account = await initNearAccount(NEAR_ACCOUNT_ID, NEAR_ACCOUNT_SK);
+    // let bnbTransaction = await createBnbTransactionAndGetItsHash();
 
-    let signature = await signPayloadWithMpc(account, MULTI_CHAIN_CONTRACT_ID, bnbTransaction, DERIVATION_PATH);
-    console.log("Signature: ", signature);
+    // let signature = await signPayloadWithMpc(account, MULTI_CHAIN_CONTRACT_ID, bnbTransaction, DERIVATION_PATH);
+    // console.log("Signature: ", signature);
 
     //////////////////////// Sign and sent to BNC //////////////////////////
     let web3 = new Web3(ETHEREUM_SEPOLIA_RPC_URL);
@@ -39,7 +40,8 @@ async function main() {
     let transactionData = {
         nonce: nonce,
         gasLimit: 21000,
-        gasPrice,
+        // gasPrice,
+        gasPrice: 123004900n, // TODO: dynamic gas price is changing the recovered address. Why?
         to: ETHEREUM_SEPOLIA_RECIEVER_ADDRESS,
         value: 1,
         chainId: null, // In legacy transaction, chainId is not included
@@ -47,17 +49,32 @@ async function main() {
     console.log("Transaction data: ", transactionData);
 
     let transaction = LegacyTransaction.fromTxData(transactionData, { common });
-    console.log("Transaction: ", transaction);
+    // console.log("Transaction: ", transaction);
 
     // let messageHash: Uint8Array[] = transaction.getMessageToSign(); // TODO: which one do we need?
     let messageHash: Uint8Array = transaction.getHashedMessageToSign();
     console.log("Message hash: ", messageHash);
+    const encodedMessageHash = RLP.encode(messageHash); // Looks like it's need to be done for Legacy transaction
+    console.log("Encoded message hash: ", encodedMessageHash);
     
-    const { v, r, s } = ecsign(messageHash, Buffer.from(ETHEREUM_SEPOLIA_SENDER_PRIVATE_KEY.slice(2), 'hex'));
+    const { v, r, s } = ecsign(encodedMessageHash, Buffer.from(ETHEREUM_SEPOLIA_SENDER_PRIVATE_KEY.slice(2), 'hex'));
     console.log(`v: ${v}, r: ${r}, s: ${s}`); // In legacy transaction, v is 27 or 28, but in EIP-155, v is chainId * 2 + 35 or chainId * 2 + 36
     
     let signedTransaction = transaction.addSignature(v, r, s);
-    console.log("Transaction with signature: ", signedTransaction);
+    // console.log("Transaction with signature: ", signedTransaction);
+    let signedMessageHash: Uint8Array = signedTransaction.getHashedMessageToSign();
+    console.log("Signed message hash: ", signedMessageHash);
+    let encodedSignedMessageHash = RLP.encode(signedMessageHash);
+    console.log("Encoded signed message hash: ", encodedSignedMessageHash);
+
+    let isSignatureValid = signedTransaction.verifySignature();
+    console.log("Is signature valid: ", isSignatureValid);
+    let recoveredSenderAddress = bytesToHex(signedTransaction.getSenderAddress().bytes);
+    console.log("Recovered sender address: ", recoveredSenderAddress);
+    let recoveredPublicKey = bytesToHex(signedTransaction.getSenderPublicKey());
+    console.log("Recovered public key: ", recoveredPublicKey);
+    let transactionValidationErrors = signedTransaction.getValidationErrors();
+    console.log("Transaction validation errors: ", transactionValidationErrors);
 
     // TODO: do we need to do this?
     const serializedTx = bytesToHex(signedTransaction.serialize());

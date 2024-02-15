@@ -29,7 +29,6 @@ const web3_1 = require("web3");
 const util_1 = require("@ethereumjs/util");
 const tx_1 = require("@ethereumjs/tx");
 const common_1 = require("@ethereumjs/common");
-const rlp_1 = require("@ethereumjs/rlp");
 const RPC_URL = "https://rpc.testnet.near.org";
 const MULTI_CHAIN_CONTRACT_ID = "multichain-testnet-2.testnet"; // "multichain-dev0.testnet"
 const NEAR_ACCOUNT_ID = "test-fastauth-user789.testnet";
@@ -47,52 +46,38 @@ async function main() {
     // console.log("Signature: ", signature);
     //////////////////////// Sign and sent to BNC //////////////////////////
     let web3 = new web3_1.Web3(ETHEREUM_SEPOLIA_RPC_URL);
-    let chainId = await web3.eth.getChainId();
-    console.log("Chain ID: ", chainId);
     let nonce = await web3.eth.getTransactionCount(ETHEREUM_SEPOLIA_SENDER_ADDRESS);
-    console.log("Nonce: ", nonce);
-    let gasPrice = await web3.eth.getGasPrice(); // Do we need this?
-    console.log("Gas price: ", gasPrice);
     await printBalances("before", web3);
-    const common = new common_1.Common({ chain: common_1.Chain.Sepolia, hardfork: common_1.Hardfork.Istanbul });
+    const common = new common_1.Common({ chain: common_1.Chain.Sepolia });
     let transactionData = {
         nonce: nonce,
         gasLimit: 21000,
-        // gasPrice,
-        gasPrice: 123004900n, // TODO: dynamic gas price is changing the recovered address. Why?
         to: ETHEREUM_SEPOLIA_RECIEVER_ADDRESS,
         value: 1,
-        chainId: null, // In legacy transaction, chainId is not included
+        chainId: ETHEREUM_SEPOLIA_CHAIN_ID,
     };
     console.log("Transaction data: ", transactionData);
-    let transaction = tx_1.LegacyTransaction.fromTxData(transactionData, { common });
-    // console.log("Transaction: ", transaction);
-    // let messageHash: Uint8Array[] = transaction.getMessageToSign(); // TODO: which one do we need?
+    let transaction = tx_1.FeeMarketEIP1559Transaction.fromTxData(transactionData, { common });
     let messageHash = transaction.getHashedMessageToSign();
-    console.log("Message hash: ", messageHash);
-    const encodedMessageHash = rlp_1.RLP.encode(messageHash);
-    console.log("Encoded message hash: ", encodedMessageHash);
-    const { v, r, s } = (0, util_1.ecsign)(encodedMessageHash, Buffer.from(ETHEREUM_SEPOLIA_SENDER_PRIVATE_KEY.slice(2), 'hex'));
-    console.log(`v: ${v}, r: ${r}, s: ${s}`); // In legacy transaction, v is 27 or 28, but in EIP-155, v is chainId * 2 + 35 or chainId * 2 + 36
-    let signedTransaction = transaction.addSignature(v, r, s);
-    // console.log("Transaction with signature: ", signedTransaction);
-    let signedMessageHash = signedTransaction.getHashedMessageToSign();
-    console.log("Signed message hash: ", signedMessageHash);
-    let encodedSignedMessageHash = rlp_1.RLP.encode(signedMessageHash);
-    console.log("Encoded signed message hash: ", encodedSignedMessageHash);
-    let isSignatureValid = signedTransaction.verifySignature();
-    console.log("Is signature valid: ", isSignatureValid);
-    let recoveredSenderAddress = (0, util_1.bytesToHex)(signedTransaction.getSenderAddress().bytes);
-    console.log("Recovered sender address: ", recoveredSenderAddress);
-    let recoveredPublicKey = (0, util_1.bytesToHex)(signedTransaction.getSenderPublicKey());
-    console.log("Recovered public key: ", recoveredPublicKey);
-    let transactionValidationErrors = signedTransaction.getValidationErrors();
-    console.log("Transaction validation errors: ", transactionValidationErrors);
-    // TODO: do we need to do this?
+    const { v, r, s } = (0, util_1.ecsign)(messageHash, Buffer.from(ETHEREUM_SEPOLIA_SENDER_PRIVATE_KEY.slice(2), 'hex'), ETHEREUM_SEPOLIA_CHAIN_ID);
+    console.log("Signature: ", { v, r, s });
+    let signedTransaction = transaction.addSignature(getYParityFromRecoveryId(v), r, s);
+    if (signedTransaction.getValidationErrors().length > 0) {
+        throw new Error("Transaction validation errors");
+    }
+    if (!signedTransaction.verifySignature()) {
+        throw new Error("Signature is not valid");
+    }
+    if ((0, util_1.bytesToHex)(signedTransaction.getSenderAddress().bytes) != ETHEREUM_SEPOLIA_SENDER_ADDRESS.toLowerCase()) {
+        throw new Error("Recovered sender address is not valid");
+    }
     const serializedTx = (0, util_1.bytesToHex)(signedTransaction.serialize());
-    const transactionHash = await web3.eth.sendSignedTransaction(`${serializedTx}`);
+    const transactionHash = await web3.eth.sendSignedTransaction(serializedTx);
     console.log("Ethereum Transaction hash: ", transactionHash);
     await printBalances("after", web3);
+}
+function getYParityFromRecoveryId(v) {
+    return 1n - (v % 2n);
 }
 async function printBalances(tag, web3) {
     console.log(`Reciever balance ${tag}:`, await web3.eth.getBalance(ETHEREUM_SEPOLIA_RECIEVER_ADDRESS));

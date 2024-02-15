@@ -2,9 +2,9 @@ import * as nearAPI from "near-api-js";
 import * as crypto from "crypto";
 import { Web3 } from "web3"
 import { ecsign, bytesToHex } from '@ethereumjs/util';
-import { LegacyTxData, LegacyTransaction } from '@ethereumjs/tx';
+import { FeeMarketEIP1559TxData, FeeMarketEIP1559Transaction } from '@ethereumjs/tx';
 import { Chain, Common, Hardfork } from '@ethereumjs/common'
-import { RLP } from '@ethereumjs/rlp'
+import * as assert from 'assert';
 
 const RPC_URL = "https://rpc.testnet.near.org";
 const MULTI_CHAIN_CONTRACT_ID = "multichain-testnet-2.testnet"; // "multichain-dev0.testnet"
@@ -27,61 +27,39 @@ async function main() {
 
     //////////////////////// Sign and sent to BNC //////////////////////////
     let web3 = new Web3(ETHEREUM_SEPOLIA_RPC_URL);
-    let chainId = await web3.eth.getChainId() as unknown as number;
-    console.log("Chain ID: ", chainId);
     let nonce = await web3.eth.getTransactionCount(ETHEREUM_SEPOLIA_SENDER_ADDRESS);
-    console.log("Nonce: ", nonce);
-    let gasPrice = await web3.eth.getGasPrice(); // Do we need this?
-    console.log("Gas price: ", gasPrice);
 
     await printBalances("before", web3);
 
-    const common = new Common({ chain: Chain.Sepolia, hardfork: Hardfork.Istanbul })
+    const common = new Common({ chain: Chain.Sepolia });
     let transactionData = {
         nonce: nonce,
         gasLimit: 21000,
-        // gasPrice,
-        gasPrice: 123004900n, // TODO: dynamic gas price is changing the recovered address. Why?
         to: ETHEREUM_SEPOLIA_RECIEVER_ADDRESS,
         value: 1,
-        chainId: null, // In legacy transaction, chainId is not included
-    } as LegacyTxData;
+        chainId: ETHEREUM_SEPOLIA_CHAIN_ID,
+    } as FeeMarketEIP1559TxData;
     console.log("Transaction data: ", transactionData);
 
-    let transaction = LegacyTransaction.fromTxData(transactionData, { common });
-    // console.log("Transaction: ", transaction);
-
-    // let messageHash: Uint8Array[] = transaction.getMessageToSign(); // TODO: which one do we need?
+    let transaction = FeeMarketEIP1559Transaction.fromTxData(transactionData, { common });
     let messageHash: Uint8Array = transaction.getHashedMessageToSign();
-    console.log("Message hash: ", messageHash);
-    const encodedMessageHash = RLP.encode(messageHash); // Looks like it's need to be done for Legacy transaction
-    console.log("Encoded message hash: ", encodedMessageHash);
-    
-    const { v, r, s } = ecsign(encodedMessageHash, Buffer.from(ETHEREUM_SEPOLIA_SENDER_PRIVATE_KEY.slice(2), 'hex'));
-    console.log(`v: ${v}, r: ${r}, s: ${s}`); // In legacy transaction, v is 27 or 28, but in EIP-155, v is chainId * 2 + 35 or chainId * 2 + 36
-    
-    let signedTransaction = transaction.addSignature(v, r, s);
-    // console.log("Transaction with signature: ", signedTransaction);
-    let signedMessageHash: Uint8Array = signedTransaction.getHashedMessageToSign();
-    console.log("Signed message hash: ", signedMessageHash);
-    let encodedSignedMessageHash = RLP.encode(signedMessageHash);
-    console.log("Encoded signed message hash: ", encodedSignedMessageHash);
+    const { v, r, s } = ecsign(messageHash, Buffer.from(ETHEREUM_SEPOLIA_SENDER_PRIVATE_KEY.slice(2), 'hex'), ETHEREUM_SEPOLIA_CHAIN_ID);
+    console.log("Signature: ", { v, r, s });
+    let signedTransaction = transaction.addSignature(getYParityFromRecoveryId(v), r, s);
+    if (signedTransaction.getValidationErrors().length > 0) { throw new Error("Transaction validation errors"); }
+    if (!signedTransaction.verifySignature()) { throw new Error("Signature is not valid"); }
 
-    let isSignatureValid = signedTransaction.verifySignature();
-    console.log("Is signature valid: ", isSignatureValid);
-    let recoveredSenderAddress = bytesToHex(signedTransaction.getSenderAddress().bytes);
-    console.log("Recovered sender address: ", recoveredSenderAddress);
-    let recoveredPublicKey = bytesToHex(signedTransaction.getSenderPublicKey());
-    console.log("Recovered public key: ", recoveredPublicKey);
-    let transactionValidationErrors = signedTransaction.getValidationErrors();
-    console.log("Transaction validation errors: ", transactionValidationErrors);
+    if (bytesToHex(signedTransaction.getSenderAddress().bytes) != ETHEREUM_SEPOLIA_SENDER_ADDRESS.toLowerCase()) { throw new Error("Recovered sender address is not valid"); }
 
-    // TODO: do we need to do this?
     const serializedTx = bytesToHex(signedTransaction.serialize());
-    const transactionHash = await web3.eth.sendSignedTransaction(`${serializedTx}`);
+    const transactionHash = await web3.eth.sendSignedTransaction(serializedTx);
     console.log("Ethereum Transaction hash: ", transactionHash);
 
     await printBalances("after", web3);
+}
+
+function getYParityFromRecoveryId(v: bigint): bigint {
+    return 1n - (v % 2n);
 }
 
 async function printBalances(tag: String, web3: Web3) {

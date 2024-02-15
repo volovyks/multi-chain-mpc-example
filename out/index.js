@@ -52,6 +52,8 @@ async function main() {
     let transactionData = {
         nonce: nonce,
         gasLimit: 21000,
+        maxFeePerGas: 32725779198,
+        maxPriorityFeePerGas: 1,
         to: ETHEREUM_SEPOLIA_RECIEVER_ADDRESS,
         value: 1,
         chainId: ETHEREUM_SEPOLIA_CHAIN_ID,

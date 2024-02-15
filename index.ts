@@ -3,8 +3,7 @@ import * as crypto from "crypto";
 import { Web3 } from "web3"
 import { ecsign, bytesToHex } from '@ethereumjs/util';
 import { FeeMarketEIP1559TxData, FeeMarketEIP1559Transaction } from '@ethereumjs/tx';
-import { Chain, Common, Hardfork } from '@ethereumjs/common'
-import * as assert from 'assert';
+import { Chain, Common } from '@ethereumjs/common'
 
 const RPC_URL = "https://rpc.testnet.near.org";
 const MULTI_CHAIN_CONTRACT_ID = "multichain-testnet-2.testnet"; // "multichain-dev0.testnet"
@@ -35,6 +34,8 @@ async function main() {
     let transactionData = {
         nonce: nonce,
         gasLimit: 21000,
+        maxFeePerGas: 32725779198,
+        maxPriorityFeePerGas: 1,
         to: ETHEREUM_SEPOLIA_RECIEVER_ADDRESS,
         value: 1,
         chainId: ETHEREUM_SEPOLIA_CHAIN_ID,
@@ -52,8 +53,8 @@ async function main() {
     if (bytesToHex(signedTransaction.getSenderAddress().bytes) != ETHEREUM_SEPOLIA_SENDER_ADDRESS.toLowerCase()) { throw new Error("Recovered sender address is not valid"); }
 
     const serializedTx = bytesToHex(signedTransaction.serialize());
-    const transactionHash = await web3.eth.sendSignedTransaction(serializedTx);
-    console.log("Ethereum Transaction hash: ", transactionHash);
+    const transactionResult = await web3.eth.sendSignedTransaction(serializedTx);
+    console.log("Ethereum Transaction hash: ", transactionResult);
 
     await printBalances("after", web3);
 }

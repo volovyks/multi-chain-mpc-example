@@ -24,11 +24,11 @@ var __importStar = (this && this.__importStar) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const nearAPI = __importStar(require("near-api-js"));
-const crypto = __importStar(require("crypto"));
 const web3_1 = require("web3");
 const util_1 = require("@ethereumjs/util");
 const tx_1 = require("@ethereumjs/tx");
 const common_1 = require("@ethereumjs/common");
+const util_2 = require("util");
 const RPC_URL = "https://rpc.testnet.near.org";
 const MULTI_CHAIN_CONTRACT_ID = "multichain-testnet-2.testnet"; // "multichain-dev0.testnet"
 const NEAR_ACCOUNT_ID = "test-fastauth-user789.testnet";
@@ -40,11 +40,6 @@ const ETHEREUM_SEPOLIA_SENDER_ADDRESS = "0x46Dd36F3235C748961427854948B32BD412Ad
 const ETHEREUM_SEPOLIA_SENDER_PRIVATE_KEY = "0x9ea65c28a56227218ae206bacfa424be4da742791d93cb396d0ff5da3cee3736";
 const ETHEREUM_SEPOLIA_CHAIN_ID = 11155111n;
 async function main() {
-    // let account = await initNearAccount(NEAR_ACCOUNT_ID, NEAR_ACCOUNT_SK);
-    // let bnbTransaction = await createBnbTransactionAndGetItsHash();
-    // let signature = await signPayloadWithMpc(account, MULTI_CHAIN_CONTRACT_ID, bnbTransaction, DERIVATION_PATH);
-    // console.log("Signature: ", signature);
-    //////////////////////// Sign and sent to BNC //////////////////////////
     let web3 = new web3_1.Web3(ETHEREUM_SEPOLIA_RPC_URL);
     let nonce = await web3.eth.getTransactionCount(ETHEREUM_SEPOLIA_SENDER_ADDRESS);
     await printBalances("before", web3);
@@ -61,9 +56,12 @@ async function main() {
     console.log("Transaction data: ", transactionData);
     let transaction = tx_1.FeeMarketEIP1559Transaction.fromTxData(transactionData, { common });
     let messageHash = transaction.getHashedMessageToSign();
-    const { v, r, s } = (0, util_1.ecsign)(messageHash, Buffer.from(ETHEREUM_SEPOLIA_SENDER_PRIVATE_KEY.slice(2), 'hex'), ETHEREUM_SEPOLIA_CHAIN_ID);
-    console.log("Signature: ", { v, r, s });
-    let signedTransaction = transaction.addSignature(getYParityFromRecoveryId(v), r, s);
+    let account = await initNearAccount(NEAR_ACCOUNT_ID, NEAR_ACCOUNT_SK);
+    let signatureResponse = await signPayloadWithMpc(account, MULTI_CHAIN_CONTRACT_ID, messageHash, DERIVATION_PATH);
+    console.log("Signature response from MPC: ", signatureResponse);
+    let { v, r, s } = getVrsFromMpcResponce(signatureResponse);
+    console.log(`v: ${v}, r: ${r}, s: ${s}`);
+    let signedTransaction = transaction.addSignature(v, stringToUint8Array(r), stringToUint8Array(s));
     if (signedTransaction.getValidationErrors().length > 0) {
         throw new Error("Transaction validation errors");
     }
@@ -74,9 +72,34 @@ async function main() {
         throw new Error("Recovered sender address is not valid");
     }
     const serializedTx = (0, util_1.bytesToHex)(signedTransaction.serialize());
-    const transactionHash = await web3.eth.sendSignedTransaction(serializedTx);
-    console.log("Ethereum Transaction hash: ", transactionHash);
+    const transactionResult = await web3.eth.sendSignedTransaction(serializedTx);
+    console.log("Ethereum Transaction hash: ", transactionResult);
     await printBalances("after", web3);
+}
+function stringToUint8Array(inputString) {
+    const encoder = new util_2.TextEncoder();
+    return encoder.encode(inputString);
+}
+function getVrsFromMpcResponce(mpcSignatureResponce) {
+    let big_r = mpcSignatureResponce[0];
+    const v = getYParityFromBigR(big_r);
+    const r = getRfromBigR(big_r);
+    const s = mpcSignatureResponce[1];
+    return { v, r, s };
+}
+function getRfromBigR(big_r) {
+    return big_r.slice(2, 66);
+}
+function getYParityFromBigR(big_r) {
+    if (big_r.startsWith("02")) {
+        return 0n;
+    }
+    else if (big_r.startsWith("03")) {
+        return 1n;
+    }
+    else {
+        throw new Error("Big R must start with '02' or '03'.");
+    }
 }
 function getYParityFromRecoveryId(v) {
     return 1n - (v % 2n);
@@ -84,11 +107,6 @@ function getYParityFromRecoveryId(v) {
 async function printBalances(tag, web3) {
     console.log(`Reciever balance ${tag}:`, await web3.eth.getBalance(ETHEREUM_SEPOLIA_RECIEVER_ADDRESS));
     console.log(`Sender balance  ${tag}:`, await web3.eth.getBalance(ETHEREUM_SEPOLIA_SENDER_ADDRESS));
-}
-async function createBnbTransactionAndGetItsHash() {
-    // TODO: Implement BNB transaction creation
-    const randomBuffer = crypto.randomBytes(32);
-    return Uint8Array.from(randomBuffer);
 }
 async function initNearAccount(accountId, secretKey) {
     const myKeyStore = new nearAPI.keyStores.InMemoryKeyStore();
@@ -109,12 +127,13 @@ async function signPayloadWithMpc(account, multichainContractId, payload, deriva
         useLocalViewExecution: false,
     });
     ;
-    return await multichainContract.sign({
+    let result = await multichainContract.sign({
         args: {
             payload: Array.from(payload),
             path: derivationPath,
         },
         gas: "300000000000000"
     });
+    return result;
 }
 main();

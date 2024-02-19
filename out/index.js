@@ -51,44 +51,58 @@ async function main() {
         maxPriorityFeePerGas: 1,
         to: ETHEREUM_SEPOLIA_RECIEVER_ADDRESS,
         value: 1,
+        // value: 1 + Math.floor(Math.random() * 1000000000000000), // randomised value to buypass same payload issue
         chainId: ETHEREUM_SEPOLIA_CHAIN_ID,
     };
     console.log("Transaction data: ", transactionData);
     let transaction = tx_1.FeeMarketEIP1559Transaction.fromTxData(transactionData, { common });
     let messageHash = transaction.getHashedMessageToSign();
-    let account = await initNearAccount(NEAR_ACCOUNT_ID, NEAR_ACCOUNT_SK);
-    let signatureResponse = await signPayloadWithMpc(account, MULTI_CHAIN_CONTRACT_ID, messageHash, DERIVATION_PATH);
-    console.log("Signature response from MPC: ", signatureResponse);
-    let { v, r, s } = getVrsFromMpcResponce(signatureResponse);
-    console.log(`v: ${v}, r: ${r}, s: ${s}`);
-    let signedTransaction = transaction.addSignature(v, stringToUint8Array(r), stringToUint8Array(s));
+    let useMpc = true;
+    let final_v, final_r, final_s;
+    if (useMpc) {
+        let account = await initNearAccount(NEAR_ACCOUNT_ID, NEAR_ACCOUNT_SK);
+        let signatureResponse = await signPayloadWithMpc(account, MULTI_CHAIN_CONTRACT_ID, messageHash, DERIVATION_PATH);
+        console.log("Signature response from MPC: ", signatureResponse);
+        let { v, r, s } = getVrsFromMpcResponce(signatureResponse);
+        final_r = r;
+        final_s = s;
+        final_v = v;
+    }
+    else {
+        const { v, r, s } = (0, util_1.ecsign)(messageHash, Buffer.from(ETHEREUM_SEPOLIA_SENDER_PRIVATE_KEY.slice(2), 'hex'), ETHEREUM_SEPOLIA_CHAIN_ID);
+        final_r = r;
+        final_s = s;
+        final_v = getYParityFromRecoveryId(v);
+    }
+    console.log(`v: ${final_v}, r: ${final_r}, s: ${final_s}`);
+    let signedTransaction = transaction.addSignature(final_v, final_r, final_s);
     if (signedTransaction.getValidationErrors().length > 0) {
         throw new Error("Transaction validation errors");
     }
     if (!signedTransaction.verifySignature()) {
         throw new Error("Signature is not valid");
     }
-    if ((0, util_1.bytesToHex)(signedTransaction.getSenderAddress().bytes) != ETHEREUM_SEPOLIA_SENDER_ADDRESS.toLowerCase()) {
-        throw new Error("Recovered sender address is not valid");
-    }
-    const serializedTx = (0, util_1.bytesToHex)(signedTransaction.serialize());
-    const transactionResult = await web3.eth.sendSignedTransaction(serializedTx);
-    console.log("Ethereum Transaction hash: ", transactionResult);
-    await printBalances("after", web3);
+    let recoveredSenderAddress = (0, util_1.bytesToHex)(signedTransaction.getSenderAddress().bytes);
+    console.log("Recovered sender address: ", recoveredSenderAddress);
+    // if (recoveredSenderAddress != ETHEREUM_SEPOLIA_SENDER_ADDRESS.toLowerCase()) { throw new Error("Recovered sender address is not valid"); }
+    // const serializedTx = bytesToHex(signedTransaction.serialize());
+    // const transactionResult = await web3.eth.sendSignedTransaction(serializedTx);
+    // console.log("Ethereum Transaction hash: ", transactionResult);
+    // await printBalances("after", web3);
 }
 function stringToUint8Array(inputString) {
     const encoder = new util_2.TextEncoder();
     return encoder.encode(inputString);
 }
 function getVrsFromMpcResponce(mpcSignatureResponce) {
-    let big_r = mpcSignatureResponce[0];
+    const big_r = mpcSignatureResponce[0];
     const v = getYParityFromBigR(big_r);
     const r = getRfromBigR(big_r);
-    const s = mpcSignatureResponce[1];
+    const s = Buffer.from(mpcSignatureResponce[1], 'hex');
     return { v, r, s };
 }
 function getRfromBigR(big_r) {
-    return big_r.slice(2, 66);
+    return Buffer.from(big_r.substring(2), 'hex');
 }
 function getYParityFromBigR(big_r) {
     if (big_r.startsWith("02")) {

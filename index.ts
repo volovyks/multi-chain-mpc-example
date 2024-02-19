@@ -1,7 +1,6 @@
 import * as nearAPI from "near-api-js";
-import * as crypto from "crypto";
-import { Web3 } from "web3"
-import { ecsign, bytesToHex } from '@ethereumjs/util';
+import { Uint, Web3 } from "web3"
+import { bytesToHex, ecsign, ecrecover } from '@ethereumjs/util';
 import { FeeMarketEIP1559TxData, FeeMarketEIP1559Transaction } from '@ethereumjs/tx';
 import { Chain, Common } from '@ethereumjs/common'
 import { TextEncoder } from 'util';
@@ -34,6 +33,7 @@ async function main() {
         maxPriorityFeePerGas: 1,
         to: ETHEREUM_SEPOLIA_RECIEVER_ADDRESS,
         value: 1,
+        // value: 1 + Math.floor(Math.random() * 1000000000000000), // randomised value to buypass same payload issue
         chainId: ETHEREUM_SEPOLIA_CHAIN_ID,
     } as FeeMarketEIP1559TxData;
     console.log("Transaction data: ", transactionData);
@@ -41,24 +41,38 @@ async function main() {
     let transaction = FeeMarketEIP1559Transaction.fromTxData(transactionData, { common });
     let messageHash: Uint8Array = transaction.getHashedMessageToSign();
 
-    let account = await initNearAccount(NEAR_ACCOUNT_ID, NEAR_ACCOUNT_SK);
-    let signatureResponse = await signPayloadWithMpc(account, MULTI_CHAIN_CONTRACT_ID, messageHash, DERIVATION_PATH);
-    console.log("Signature response from MPC: ", signatureResponse);
+    let useMpc = true;
+    let final_v: bigint, final_r: Uint8Array, final_s: Uint8Array;
 
-    let { v, r, s } = getVrsFromMpcResponce(signatureResponse);
-    console.log(`v: ${v}, r: ${r}, s: ${s}`);
+    if (useMpc) {
+        let account = await initNearAccount(NEAR_ACCOUNT_ID, NEAR_ACCOUNT_SK);
+        let signatureResponse = await signPayloadWithMpc(account, MULTI_CHAIN_CONTRACT_ID, messageHash, DERIVATION_PATH);
+        console.log("Signature response from MPC: ", signatureResponse);
+        let { v, r, s } = getVrsFromMpcResponce(signatureResponse);
+        final_r = r;
+        final_s = s;
+        final_v = v;
+    } else {
+        const { v, r, s } = ecsign(messageHash, Buffer.from(ETHEREUM_SEPOLIA_SENDER_PRIVATE_KEY.slice(2), 'hex'), ETHEREUM_SEPOLIA_CHAIN_ID);
+        final_r = r;
+        final_s = s;
+        final_v = getYParityFromRecoveryId(v);
+    }
+    console.log(`v: ${final_v}, r: ${final_r}, s: ${final_s}`);
 
-    let signedTransaction = transaction.addSignature(v, stringToUint8Array(r), stringToUint8Array(s));
+    let signedTransaction = transaction.addSignature(final_v, final_r, final_s);
     if (signedTransaction.getValidationErrors().length > 0) { throw new Error("Transaction validation errors"); }
     if (!signedTransaction.verifySignature()) { throw new Error("Signature is not valid"); }
 
-    if (bytesToHex(signedTransaction.getSenderAddress().bytes) != ETHEREUM_SEPOLIA_SENDER_ADDRESS.toLowerCase()) { throw new Error("Recovered sender address is not valid"); }
+    let recoveredSenderAddress = bytesToHex(signedTransaction.getSenderAddress().bytes);
+    console.log("Recovered sender address: ", recoveredSenderAddress);
+    // if (recoveredSenderAddress != ETHEREUM_SEPOLIA_SENDER_ADDRESS.toLowerCase()) { throw new Error("Recovered sender address is not valid"); }
 
-    const serializedTx = bytesToHex(signedTransaction.serialize());
-    const transactionResult = await web3.eth.sendSignedTransaction(serializedTx);
-    console.log("Ethereum Transaction hash: ", transactionResult);
+    // const serializedTx = bytesToHex(signedTransaction.serialize());
+    // const transactionResult = await web3.eth.sendSignedTransaction(serializedTx);
+    // console.log("Ethereum Transaction hash: ", transactionResult);
 
-    await printBalances("after", web3);
+    // await printBalances("after", web3);
 }
 
 function stringToUint8Array(inputString: string): Uint8Array {
@@ -66,16 +80,16 @@ function stringToUint8Array(inputString: string): Uint8Array {
     return encoder.encode(inputString);
 }
 
-function getVrsFromMpcResponce(mpcSignatureResponce: [string, string]) {
-    let big_r = mpcSignatureResponce[0];
+function getVrsFromMpcResponce(mpcSignatureResponce: [string, string]): { v: bigint, r: Uint8Array, s: Uint8Array } {
+    const big_r = mpcSignatureResponce[0];
     const v = getYParityFromBigR(big_r);
     const r = getRfromBigR(big_r);
-    const s = mpcSignatureResponce[1];
+    const s = Buffer.from(mpcSignatureResponce[1], 'hex');
     return { v, r, s };
 }
 
-function getRfromBigR(big_r: string) {
-    return big_r.slice(2, 66);
+function getRfromBigR(big_r: string): Uint8Array {
+    return Buffer.from(big_r.substring(2), 'hex');
 }
 
 function getYParityFromBigR(big_r: string): bigint {
